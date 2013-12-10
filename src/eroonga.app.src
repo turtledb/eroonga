@@ -7,27 +7,27 @@
   {included_applications, [poolboy]},
   {applications, [kernel, stdlib]},
   {env, [
-         {poolboy, [
-                    {eroonga_pool,
-                     [
-                      {size, 1},
-                      {max_overflow, 3}
-                     ],
-                     [
-                      {address, "localhost"},
-                      {port, 10041},
-                      {options, [
-                                 {active, false},
-                                 {buffer, 293976},
-                                 {keepalive, true},
-                                 {mode, binary},
-                                 {packet, raw},
-                                 {recbuf, 146988},
-                                 {sndbuf, 146988}
-                                ]},
-                      {timeout, 10}
-                     ]}
-                   ]}
+%        {poolboy, [
+%                   {eroonga_pool,
+%                    [
+%                     {size, 1},
+%                     {max_overflow, 3}
+%                    ],
+%                    [
+%                     {address, "localhost"},
+%                     {port, 10041},
+%                     {options, [
+%                                {active, false},
+%                                {buffer, 293976},
+%                                {keepalive, true},
+%                                {mode, binary},
+%                                {packet, raw},
+%                                {recbuf, 146988},
+%                                {sndbuf, 146988}
+%                               ]},
+%                     {timeout, 10}
+%                    ]}
+%                  ]}
         ]},
   {mod, {eroonga_app, []}}
  ]}.
