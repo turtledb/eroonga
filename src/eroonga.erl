@@ -1,20 +1,23 @@
 %% =============================================================================
 %% Copyright 2013 AONO Tomohiko
 %%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
+%% This library is free software; you can redistribute it and/or
+%% modify it under the terms of the GNU Lesser General Public
+%% License version 2.1 as published by the Free Software Foundation.
 %%
-%% http://www.apache.org/licenses/LICENSE-2.0
+%% This library is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+%% Lesser General Public License for more details.
 %%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
+%% You should have received a copy of the GNU Lesser General Public
+%% License along with this library; if not, write to the Free Software
+%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
 
 -module(eroonga).
+
+-include("eroonga_internal.hrl").
 
 %% -- public: application --
 -export([start/0, stop/0, get_client_version/0]).
@@ -22,10 +25,11 @@
 %% -- public: pool --
 -export([connect/1, close/2]).
 
-%% -- public: worker --
--export([command/2]).
+%% -- public: client --
+-export([command/2, command/3]).
 
--export([status/1, table_list/1]).
+%% -- public: driver --
+-export([select/3, select/4]).
 
 %% == public: application ==
 
@@ -64,26 +68,27 @@ close(Pool, Worker)
   when is_atom(Pool), is_pid(Worker) ->
     eroonga_app:checkin(Pool, Worker).
 
-%% == public: worker ==
+%% == public: client ==
 
 -spec command(pid(),binary()) -> {ok,term()}|{error,_}.
 command(Pid, Binary)
   when is_pid(Pid), is_binary(Binary) ->
-    eroonga_client:call(Pid, {call,[Binary]}).
+    command(eroonga_client, Pid, Binary). % TODO
+
+-spec command(module(),pid(),binary()) -> {ok,term()}|{error,_}.
+command(Module, Pid, Binary)
+  when is_atom(Module), is_pid(Pid), is_binary(Binary) ->
+    apply(Module, call, [Pid, {call,[Binary]}]).
 
 
--spec status(pid()) -> {ok,term()}|{error,_}.
-status(Pid)
-  when is_pid(Pid) ->
-    command(Pid, <<"status">>).
+%% == public: driver ==
 
--spec table_list(pid()) -> {ok,term()}|{error,_}.
-table_list(Pid)
-  when is_pid(Pid) ->
-    command(Pid, <<"table_list">>).
+-spec select(pid(),binary(),binary()) -> {ok,term()}|{error,_}.
+select(Pid, Table, Expression)
+  when is_pid(Pid), is_binary(Table), is_binary(Expression) ->
+    select(eroonga_port, Pid, Table, Expression). % TODO
 
-%% TODO
-%%  cache_limit, check, clearlock, column_create, column_list, column_remove,
-%%  column_rename, define_selector, defrag, delete, dump, load, log_level,
-%%  log_put, log_reopen, normalize, quit, register, ruby_eval, ruby_load,
-%%  select, shutdown, suggest, table_create, table_remove, tokenize,truncate
+-spec select(module(),pid(),binary(),binary()) -> {ok,term()}|{error,_}.
+select(Module, Pid, Table, Expression)
+  when is_atom(Module), is_pid(Pid), is_binary(Table), is_binary(Expression) ->
+    apply(Module, call, [Pid,?ERN_OUTPUT_TABLE_SELECT,[Table,Expression]]).

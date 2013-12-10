@@ -1,17 +1,18 @@
 %% =============================================================================
 %% Copyright 2013 AONO Tomohiko
 %%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
+%% This library is free software; you can redistribute it and/or
+%% modify it under the terms of the GNU Lesser General Public
+%% License version 2.1 as published by the Free Software Foundation.
 %%
-%% http://www.apache.org/licenses/LICENSE-2.0
+%% This library is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+%% Lesser General Public License for more details.
 %%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
+%% You should have received a copy of the GNU Lesser General Public
+%% License along with this library; if not, write to the Free Software
+%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
 
 -module(eroonga_app).
@@ -19,34 +20,14 @@
 -include("eroonga_internal.hrl").
 
 %% -- public --
--export([call/2, call/3]).
--export([checkin/2, checkout/3, deps/0, version/0]).
+-export([checkin/2, checkout/3]).
+-export([env/0, deps/0, version/0]).
 
 %% -- behaviour: application --
 -behaviour(application).
--export([start/2, prep_stop/1, stop/1]).
-
-%% -- private --
--define(APP, eroonga).
--define(WORKER, eroonga_client).
+-export([start/2, stop/1]).
 
 %% == public ==
-
--spec call(node(),term()) -> any().
-call(Pool, Command)
-  when is_atom(Pool) ->
-    call(Pool, Command, timer:seconds(3)).
-
--spec call(node(),term(),timeout()) -> any().
-call(Pool, Command, Timeout)
-  when is_atom(Pool) ->
-    case eroonga_sup:find(eroonga_sup, Pool) of
-        undefined ->
-            {error, badarg};
-        Pid ->
-            F = fun(Worker) -> ?WORKER:call(Worker, Command) end,
-            poolboy:transaction(Pid, F, Timeout)
-    end.
 
 -spec checkin(atom(),pid()) -> ok|{error,_}.
 checkin(Pool, Worker)
@@ -73,6 +54,11 @@ checkout(Pool, Block, Timeout)
             end
     end.
 
+-spec env() ->[property()].
+env() ->
+    _ = application:load(?APP),
+    lists:sort(application:get_all_env(?APP)).
+
 -spec deps() -> [atom()].
 deps() ->
     _ = application:load(?APP),
@@ -82,44 +68,65 @@ deps() ->
 -spec version() -> [non_neg_integer()].
 version() ->
     _ = application:load(?APP),
-    {ok, List} = application:get_key(eroonga, vsn),
+    {ok, List} = application:get_key(?APP, vsn),
     lists:map(fun list_to_integer/1, string:tokens(List, ".")).
 
 %% == behaviour: application ==
 
 -record(state, {
+          driver :: tuple(), % eroonga_driver:handle()
           sup :: pid()
          }).
 
-start(normal, []) ->
-    case start_sup(application:get_all_env(?APP)) of
-        {ok, Pid} ->
-            {ok, Pid, #state{sup = Pid}};
-        {error, Reason} ->
+start(_StartType, StartArgs) ->
+    try lists:foldl(fun setup/2, setup(StartArgs), env()) of
+        #state{sup=P}=S ->
+            {ok, P, S}
+    catch
+        {Reason, State} ->
+            cleanup(State),
             {error, Reason}
     end.
 
-prep_stop(#state{sup=P}=S)
+stop(State) ->
+    cleanup(State).
+
+%% == private: state ==
+
+cleanup(#state{sup=P}=S)
   when undefined =/= P ->
-    ok = stop_sup(),
-    S#state{sup = undefined}.
+    _ = eroonga_sup:stop(P),
+    cleanup(S#state{sup = undefined});
+cleanup(#state{driver=D}=S)
+  when undefined =/= D ->
+    _ = eroonga_driver:unload(D),
+    cleanup(S#state{driver = undefined});
+cleanup(#state{}) ->
+    eroonga_util:flush().
 
-stop(#state{sup=undefined}) ->
-    ok.
+setup([]) ->
+    #state{}.
 
-%% == private: sup ==
-
-start_sup(Args) ->
-    case lists:foldl(fun setup_sup/2, [], Args) of
-        List ->
-            T = {one_for_one, 0, timer:seconds(1)},
-            eroonga_sup:start_link({local,eroonga_sup}, {T,List})
-    end.
-
-stop_sup() ->
-    eroonga_sup:stop(eroonga_sup).
-
-setup_sup({poolboy,Args}, List) ->
-    List ++ [ poolboy:child_spec(N,[{worker_module,?WORKER}|O],A) || {N,O,A} <- Args ];
-setup_sup({_Key,_Value}, List) ->
-    List. % ignore
+setup({driver,Term}, #state{driver=undefined}=S)
+  when is_list(Term) ->
+    case eroonga_driver:load(Term) of
+        {ok, Driver} ->
+            S#state{driver = Driver};
+        {error, Reason} ->
+            throw({Reason,S})
+    end;
+setup({poolboy,Term}, #state{driver=D,sup=undefined}=S)
+  when is_list(Term), is_tuple(D) ->
+    T = {one_for_one, 0, timer:seconds(1)},
+    L = [ poolboy:child_spec(Pool,
+                             [{worker_module,Worker}|PoolArgs],
+                             [{driver,D}|WorkerArgs]
+                            ) || {Pool,PoolArgs,Worker,WorkerArgs} <- Term ],
+    case eroonga_sup:start_link({local,eroonga_sup}, {T,L}) of
+        {ok, Pid} ->
+            S#state{sup = Pid};
+        {error, Reason} ->
+            throw({Reason,S})
+    end;
+setup(_Ignore, #state{}=S) ->
+    S.

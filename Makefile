@@ -12,7 +12,7 @@
 #CFLAGS += -D__STDC_FORMAT_MACROS -D__STDC_CONSTANT_MACROS
  CFLAGS += -g
  CFLAGS += -Wall
- CFLAGS += -Wextra
+#CFLAGS += -Wextra
  CFLAGS += -fPIC
  CFLAGS += -fno-common
 
@@ -69,7 +69,7 @@ build_plt:
 dialyzer:
 	@$(ERLANG_HOME)/bin/dialyzer $(DIALYZER_OPT)
 
-client:
+client driver: compile
 	@$(ERLANG_HOME)/bin/erl $(ERL_OPT) -config files/$@
 
 test: compile ct
@@ -78,10 +78,12 @@ distclean: clean delete-deps
 	@-rm -f deps $(PLT)
 
 #
-x1: compile
+x%: compile
 	@ERL_FLAGS="" $(ERLANG_HOME)/bin/escript escript/$@.escript
 #
 start:
 	$(GROONGA_HOME)/bin/groonga -p 10041 -d /tmp/groonga/x1 localhost
 stop:
 	$(GROONGA_HOME)/bin/groonga -p 10041 -c localhost shutdown
+data:
+	$(GROONGA_HOME)/bin/groonga -n /tmp/groonga/x3 < files/x3.txt 

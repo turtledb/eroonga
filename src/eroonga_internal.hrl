@@ -1,18 +1,21 @@
 %% =============================================================================
 %% Copyright 2013 AONO Tomohiko
 %%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
+%% This library is free software; you can redistribute it and/or
+%% modify it under the terms of the GNU Lesser General Public
+%% License version 2.1 as published by the Free Software Foundation.
 %%
-%% http://www.apache.org/licenses/LICENSE-2.0
+%% This library is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+%% Lesser General Public License for more details.
 %%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
+%% You should have received a copy of the GNU Lesser General Public
+%% License along with this library; if not, write to the Free Software
+%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
+
+-define(APP, eroonga).
 
 %% == ~/include/groonga.h ==
 
@@ -35,8 +38,16 @@
 %% -- define --
 -define(GRN_COM_PROTO_GQTP, "\xc7").
 
-
 %% == other ==
+%
+-define(ERN_CONTROL_DB_OPEN, 0).
+
+-define(ERN_OUTPUT_TABLE_SELECT, 0).
+
+%% cache_limit, check, clearlock, column_create, column_list, column_remove,
+%% column_rename, define_selector, defrag, delete, dump, load, log_level,
+%% log_put, log_reopen, normalize, quit, register, ruby_eval, ruby_load,
+%% select, shutdown, suggest, table_create, table_remove, tokenize,truncate
 
 -define(ISSET(B,P), (P =:= B band P)).
 

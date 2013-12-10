@@ -1,17 +1,18 @@
 %% =============================================================================
 %% Copyright 2013 AONO Tomohiko
 %%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
+%% This library is free software; you can redistribute it and/or
+%% modify it under the terms of the GNU Lesser General Public
+%% License version 2.1 as published by the Free Software Foundation.
 %%
-%% http://www.apache.org/licenses/LICENSE-2.0
+%% This library is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+%% Lesser General Public License for more details.
 %%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
+%% You should have received a copy of the GNU Lesser General Public
+%% License along with this library; if not, write to the Free Software
+%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
 
 -module(eroonga_driver).
@@ -20,32 +21,33 @@
 
 %% -- public --
 -export([load/1, unload/1]).
+-export([path/1, name/1, settings/1]).
 -export([open/1, open/2, close/1]).
--export([call/3, command/2, control/3]).
+-export([command/4, control/3]).
 
 %% -- private --
--record(inner, {
+-record(handle, {
           path :: string(),
           name :: string(),
-          settings = [] :: [property()]
+          settings :: [property()]
          }).
 
--type(inner() :: #inner{}).
+-type(handle() :: #handle{}).
 
 %% == public ==
 
--spec load([property()]) -> {ok,inner()}|{error,_}.
+-spec load([property()]) -> {ok,handle()}|{error,_}.
 load(Configs)
   when is_list(Configs) ->
-    try lists:foldl(fun check_config/2, #inner{}, Configs ++ [{path,undefined}]) of
-        #inner{path=P,name=N}=R ->
+    try lists:foldl(fun set_handle/2, setup(), Configs) of
+        #handle{path=P,name=N}=H ->
             case erl_ddll:load(P, N) of
                 ok ->
-                    {ok, R};
+                    {ok, H};
                 {error, already_loaded} ->
-                    {ok, R};
+                    {ok, H};
                 {error, Reason} ->
-                    error_logger:error_report([erl_ddll:format_error(Reason),R]),
+                    error_logger:error_report([erl_ddll:format_error(Reason),H]),
                     {error, Reason}
             end
     catch
@@ -53,18 +55,31 @@ load(Configs)
             {error, Reason}
     end.
 
--spec unload(inner()) -> ok|{error,_}.
-unload(#inner{name=N}) ->
+-spec unload(handle()) -> ok|{error,_}.
+unload(#handle{name=N})
+  when undefined =/= N ->
     erl_ddll:unload(N).
 
--spec open(inner()) -> {ok,port()}|{error,_}.
-open(#inner{settings=L}=R) ->
-    open(R, [binary|proplists:delete(binary,L)]).
+-spec path(handle()) -> string().
+path(#handle{path=P}) ->
+    P.
 
--spec open(inner(),[property()]) -> {ok,port()}|{error,_}.
-open(#inner{name=N}, Settings)
-  when is_list(Settings) ->
-    try open_port({spawn_driver,N}, Settings) of
+-spec name(handle()) -> string().
+name(#handle{name=N}) ->
+    N.
+
+-spec settings(handle()) -> [property()].
+settings(#handle{settings=L}) ->
+    L.
+
+-spec open(handle()) -> {ok,port()}|{error,_}.
+open(#handle{settings=L}=H) ->
+    open(H, L).
+
+-spec open(handle(),[property()]) -> {ok,port()}|{error,_}.
+open(#handle{name=N}, Settings)
+  when undefined =/= N, is_list(Settings) ->
+    try open_port({spawn_driver,N}, [binary|proplists:delete(binary,Settings)]) of
         Port ->
             {ok, Port}
     catch
@@ -75,82 +90,37 @@ open(#inner{name=N}, Settings)
 -spec close(port()) -> ok.
 close(Port)
   when is_port(Port)->
-    unlink(Port),
-    port_close(Port),
+    true = unlink(Port),
+    true = port_close(Port),
     ok.
 
--spec call(port(),integer(),any()) -> ok|{error,_}.
-call(Port, Command, Data)
-  when is_port(Port), is_integer(Command), is_binary(Data) ->
-    control(Port, Command, Data); % NOT_SUPPORTED?, darwin-64bit (12.2.0)
-call(Port, Command, Data)
-  when is_port(Port) ->
-    control(Port, Command, term_to_binary(Data)).
-
--spec command(port(),binary()) -> ok|{error,_}.
-command(Port, Data)
-  when is_port(Port), is_binary(Data) ->
-    try port_command(Port, Data) of
+-spec command(port(),reference(),integer(),[term()]) -> ok|{error,_}.
+command(Port, Ref, Command, Args)
+  when is_port(Port), is_reference(Ref), is_integer(Command), is_list(Args) ->
+    try port_command(Port, term_to_binary({Ref,Command,Args})) of
         true ->
             ok
     catch
         _:Reason ->
             {error, Reason}
-    end;
-command(Port, Data)
-  when is_port(Port) ->
-    command(Port, term_to_binary(Data)).
+    end.
 
--spec control(port(),integer(),any()) -> ok|{error,_}.
-control(Port, Command, Data)
-  when is_port(Port), is_integer(Command), is_binary(Data) ->
-    try port_control(Port, Command, Data) of
+-spec control(port(),integer(),[term()]) -> term()|{error,_}.
+control(Port, Command, Args)
+  when is_port(Port), is_integer(Command), is_list(Args) ->
+    try port_control(Port, Command, term_to_binary(Args)) of
         Term when is_binary(Term) ->
             binary_to_term(Term)
     catch
         _:Reason ->
             {error, Reason}
-    end;
-control(Port, Command, Data)
-  when is_port(Port), is_integer(Command) ->
-    control(Port, Command, term_to_binary(Data)).
+    end.
 
 %% == private ==
 
--spec check_config(property(),inner()) -> inner().
-%% -- path --
-check_config({path, Path}, #inner{path=undefined}=R)
-  when is_atom(Path) ->
-    R#inner{path = lib_dir(Path)};
-check_config({path, Path}, #inner{path=undefined}=R)
-  when is_binary(Path) ->
-    R#inner{path = binary_to_list(Path)};
-check_config({path, Path}, #inner{path=undefined}=R)
-  when is_list(Path) ->
-    R#inner{path = Path};
-%% -- name --
-check_config({name, Name}, #inner{name=undefined}=R)
-  when is_atom(Name) ->
-    R#inner{name = atom_to_list(Name)};
-check_config({name, Name}, #inner{name=undefined}=R)
-  when is_binary(Name) ->
-    R#inner{name = binary_to_list(Name)};
-check_config({name, Name}, #inner{name=undefined}=R)
-  when is_list(Name) ->
-    R#inner{name = Name};
-%% -- settings --
-check_config({settings, Settings}, #inner{name=undefined}=R)
-  when is_list(Settings) ->
-    R#inner{settings = Settings};
-%% -- --
-check_config({Key, _Value}, #inner{}) ->
-    throw({badmatch, Key}).
-
--spec lib_dir(atom()) -> filename().
 lib_dir(Application) ->
-    filename:join(lib_dir(Application, priv), "lib").
+    filename:join(lib_dir(Application,priv), "lib").
 
--spec lib_dir(atom(),atom()) -> filename().
 lib_dir(Application, SubDir) ->
     case code:lib_dir(Application, SubDir) of
         {error, bad_name} ->
@@ -159,3 +129,25 @@ lib_dir(Application, SubDir) ->
         Dir ->
             Dir
     end.
+
+set_handle({path,Term}, #handle{}=H) ->
+    if is_binary(Term) -> H#handle{path = binary_to_list(Term)};
+       is_list(Term)   -> H#handle{path = Term};
+       true -> throw({badarg,path})
+    end;
+set_handle({name,Term}, #handle{}=H) ->
+    if is_binary(Term) -> H#handle{name = binary_to_list(Term)};
+       is_list(Term)   -> H#handle{name = Term};
+       true -> throw({badarg,name})
+    end;
+set_handle({settings,Term}, #handle{}=H) ->
+    if is_list(Term) -> H#handle{settings = Term};
+       true -> throw({badarg,settings})
+    end;
+set_handle(_Ignore, #handle{}=H) ->
+    H.
+
+setup() ->
+    #handle{path = lib_dir(undefined),
+            name = lists:concat(["lib",atom_to_list(?APP),"_drv"]),
+            settings = []}.

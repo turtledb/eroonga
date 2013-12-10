@@ -1,17 +1,18 @@
 %% =============================================================================
 %% Copyright 2013 AONO Tomohiko
 %%
-%% Licensed under the Apache License, Version 2.0 (the "License");
-%% you may not use this file except in compliance with the License.
-%% You may obtain a copy of the License at
+%% This library is free software; you can redistribute it and/or
+%% modify it under the terms of the GNU Lesser General Public
+%% License version 2.1 as published by the Free Software Foundation.
 %%
-%% http://www.apache.org/licenses/LICENSE-2.0
+%% This library is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+%% Lesser General Public License for more details.
 %%
-%% Unless required by applicable law or agreed to in writing, software
-%% distributed under the License is distributed on an "AS IS" BASIS,
-%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-%% See the License for the specific language governing permissions and
-%% limitations under the License.
+%% You should have received a copy of the GNU Lesser General Public
+%% License along with this library; if not, write to the Free Software
+%% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
 
 -module(eroonga_port).
@@ -19,30 +20,37 @@
 -include("eroonga_internal.hrl").
 
 %% -- public --
--export([start_link/3, stop/1]).
--export([call/3, call/4]).
+-export([start_link/1, stop/1]).
+-export([call/3, cast/3]).
 
 %% -- behaviour: gen_server --
 -behaviour(gen_server).
 -export([init/1, terminate/2, code_change/3,
          handle_call/3, handle_cast/2, handle_info/2]).
 
+%% -- private --
+-record(state, {
+          port :: port(),
+          path :: binary(),
+          assigned :: dict()
+         }).
+
 %% == public ==
 
--spec start_link(tuple(),[any()],pos_integer()) -> {ok,pid()}|{error,_}.
-start_link(Driver, Args, Id)
-  when is_tuple(Driver), is_list(Args), is_integer(Id), Id > 0 ->
-    case gen_server:start_link(?MODULE, [Id], []) of
+-spec start_link([property()]) -> {ok,pid()}|ignore|{error,_}.
+start_link(Args)
+  when is_list(Args) ->
+    case gen_server:start_link(?MODULE, [], []) of
         {ok, Pid} ->
-            case gen_server:call(Pid, {setup,Driver,Args}) of
+            case gen_server:call(Pid, {setup,Args}, infinity) of
                 ok ->
                     {ok, Pid};
                 {error, Reason} ->
                     stop(Pid),
                     {error, Reason}
             end;
-        {error, Reason} ->
-            {error, Reason}
+        Other ->
+            Other
     end.
 
 -spec stop(pid()) -> ok.
@@ -50,34 +58,22 @@ stop(Pid)
   when is_pid(Pid) ->
     gen_server:call(Pid, stop).
 
--spec call(pid(),integer(),any()) -> any().
+-spec call(pid(),integer(),[term()]) -> term().
 call(Pid, Command, Args)
-  when is_pid(Pid), is_integer(Command) ->
-    gen_server:call(Pid, {call,Command,Args}).
+  when is_pid(Pid), is_integer(Command), is_list(Args) ->
+    case cast(Pid, Command, Args) of
+        ok ->
+            receive {_Ref, Reply} -> Reply end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
 
--spec call(pid(),integer(),any(),function()) -> [any()]|{error,_}.
-call(Pid, Command, Args, Fun)
-  when is_pid(Pid), is_integer(Command), is_function(Fun) ->
-    gen_server:call(Pid, {call,Command,Args,Fun}).
+-spec cast(pid(),integer(),[term()]) -> term().
+cast(Pid, Command, Args)
+  when is_pid(Pid), is_integer(Command), is_list(Args) ->
+    gen_server:call(Pid, {command,Command,Args}).
 
 %% == behaviour: gen_server ==
-
--record(inner, {
-          from :: {pid(),_},
-          handler :: function(),
-          list = [] :: [any()]
-         }).
-
--type(inner() :: #inner{}).
-
--record(state, { % 1-client = 1-id = 1-port
-          id  :: non_neg_integer(),
-          port :: port(),
-          command = 0 :: integer(),
-          assigned :: inner()
-         }).
-
--type(state() :: #state{}).
 
 init(Args) ->
     setup(Args).
@@ -88,21 +84,20 @@ terminate(_Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-handle_call({call,Command,Args}, _From, #state{port=P,assigned=undefined}=S) ->
-    Result = ergen_driver:call(P, Command, Args),
-    {reply, Result, S};
-handle_call({call,Command,Args,Fun}, From, #state{port=P,assigned=undefined}=S) ->
-    case ergen_driver:command(P, {Command,Args}) of
+handle_call({command,Command,Args}, From, #state{port=P,assigned=A}=S)
+  when is_integer(Command), is_list(Args)->
+    case eroonga_driver:command(P, R=make_ref(), Command, Args) of
         ok ->
-            {noreply, S#state{assigned = #inner{from = From, handler = Fun} }};
+            {reply, ok, S#state{assigned = dict:append(R,From,A)}};
         {error, Reason} ->
             {reply, {error,Reason}, S}
     end;
-handle_call({setup,Driver,Args}, _From, #state{}=S) ->
-    case setup(Driver, Args, S) of
-        {ok, State} ->
-            {reply, ok, State};
-        {error, Reason, State} ->
+handle_call({setup,Args}, _From, #state{}=S) ->
+    try lists:foldl(fun setup/2, S, Args) of
+        State ->
+            {reply, ok, State}
+    catch
+        {Reason, State} ->
             {reply, {error,Reason}, State}
     end;
 handle_call(stop, _From, State) ->
@@ -113,87 +108,53 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
     {noreply, State}.
 
-handle_info({P,{data,_}}, #state{port=P,assigned=undefined}=S) ->
-    {noreply, S};
-handle_info({P,{data,Data}}, #state{port=P,assigned=A}=S) ->
-    #inner{from=F,handler=H,list=L} = A,
-    case binary_to_term(Data) of
-        {ok, Term} ->
-            case H(Term) of
-                ignore ->
-                    {noreply, S};
-                {noreply, Result} ->
-                    {noreply, S#state{assigned = A#inner{list = [Result|L]} }};
-                {reply, Result} ->
-                    gen_server:reply(F, lists:reverse([Result|L])),
-                    {noreply, S#state{assigned = undefined}}
-            end;
-        {error, Reason} ->
-            gen_server:reply(F, {error,Reason}),
-            {noreply, S#state{assigned = undefined}}
+handle_info({P,{data,Data}}, #state{port=P,assigned=A}=S)
+  when is_binary(Data) ->
+    {R, Reply} = binary_to_term(Data),
+    case dict:find(R, A) of
+        {ok, [Client]} ->
+            _ = gen_server:reply(Client, Reply),
+            {noreply, S#state{assigned = dict:erase(R,A)}};
+        error ->
+            {stop, {error,enoent}, S}
     end;
-handle_info({'EXIT',P,Reason}, #state{port=P}=S) ->
-    {stop, Reason, S#state{port=undefined}};
+handle_info({'EXIT',_Pid,Reason}, State) ->
+    {stop, Reason, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 %% == private: state ==
 
--spec cleanup(state()) -> ok.
-%% cleanup(#state{port=P,command=C}=S)
-%%   when is_port(P), C >= ?CMD_ALL_ALLOC ->
-%%     _ = ergen_driver:control(P, ?CMD_ALL_FREE, []),
-%%     cleanup(S#state{command = 0});
-%% cleanup(#state{port=P,command=C}=S)
-%%   when is_port(P), C < ?CMD_ALL_ALLOC ->
-%%     _ = ergen_driver:close(P),
-%%     cleanup(S#state{port = undefined});
+cleanup(#state{port=P}=S)
+  when undefined =/= P ->
+    _ = eroonga_driver:close(P),
+    cleanup(S#state{port = undefined});
 cleanup(#state{}) ->
-    %%io:format("~p [~p:cleanup]~n", [self(),?MODULE]),
-    ergen_util:flush().
+    eroonga_util:flush().
 
--spec setup([any()]) -> {ok,state()}|{stop,_}.
-setup([Id]) ->
-    %%io:format("~p [~p:setup] id=~w~n", [self(),?MODULE, Id]),
+setup([]) ->
     process_flag(trap_exit, true),
-    {ok, #state{id = Id}};
-setup(_) ->
-    {stop, badarg}.
+    {ok, #state{assigned = dict:new()}}.
 
--spec setup(tuple(),[any()],state()) -> {ok,state()}|{error,_,state()}.
-setup(Driver, Options, #state{port=undefined}=S)
-  when is_tuple(Driver) ->
-    case ergen_driver:open(Driver) of
+setup({driver,Term}, #state{port=undefined}=S)
+  when is_tuple(Term) ->
+    case eroonga_driver:open(Term) of
         {ok, Port} ->
-            setup(Driver, Options, S#state{port = Port});
+            S#state{port = Port};
         {error, Reason} ->
-            {error, Reason, S}
+            throw({Reason,S})
     end;
-setup(Driver, Options, #state{id=I,command=0}=S)
-  when is_list(Options) ->
-    L = [
-         %% {?CMD_ALL_INIT,   [{id,I}|proplists:delete(id,Options)]},
-         %% {?CMD_ALL_ALLOC,  []},
-         %% {?CMD_ALL_CONFIG, proplists:delete(id,Options)}
-        ],
-    try lists:foldl(fun control/2, S, L) of
-        State ->
-            setup(Driver, Options, State)
-    catch
-        {Reason, Command} ->
-            {error, Reason, S#state{command = Command}}
-    end;
-setup(_Driver, _Options, #state{}=S) ->
-    {ok, S}.
-
-%% == private: etc ==
-
--spec control({integer(),[any()]},state()) -> state().
-control({Command,Args}, #state{port=P,command=C}=S)
-  when Command > C ->
-    case ergen_driver:control(P, Command, Args) of
+setup({path,Term}, #state{port=P}=S)
+  when is_port(P) ->
+    Path = if is_binary(Term) -> Term;
+              is_list(Term)   -> list_to_binary(Term);
+              true -> throw({badarg,path})
+           end,
+    case eroonga_driver:control(P, ?ERN_CONTROL_DB_OPEN, [Path]) of
         ok ->
-            S#state{command = Command};
+            S#state{path = Path};
         {error, Reason} ->
-            throw({Reason,C})
-    end.
+            throw({Reason,S})
+    end;
+setup(_Ignore, #state{}=S) ->
+    S.
