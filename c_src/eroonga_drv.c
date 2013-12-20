@@ -326,7 +326,7 @@ static int init() {
 
 static ErlDrvData start(ErlDrvPort port, char *command) {
 
-  UNUSED(command); // command=driver_name
+  UNUSED(command); // = driver_name
 
   void *ptr = driver_alloc(sizeof(driver_data_t));
 
@@ -391,11 +391,11 @@ static void output(ErlDrvData drv_data, char *buf, ErlDrvSizeT len) {
 
   if (3 == arity) {
 
+    ei_x_buff x2;
+    ei_x_new(&x2);
+
     erlang_ref ref;
     ei_decode_ref(buf, &index, &ref);
-
-    ei_x_encode_tuple_header(&x, 2); // TODO
-    ei_x_encode_ref(&x, &ref);
 
     unsigned long command;
     ei_decode_ulong(buf, &index, &command);
@@ -403,13 +403,19 @@ static void output(ErlDrvData drv_data, char *buf, ErlDrvSizeT len) {
     driver_func_t func = TABLE_SIZE > command ? TABLE[command] : NULL;
 
     if (NULL != func) {
-      exec(func, len, data, buf, &index, &x);
+      exec(func, len, data, buf, &index, &x2);
     } else {
-      encode_error(&x, "not_implemented");
+      encode_error(&x2, "enosys");
     }
 
+    ei_x_encode_tuple_header(&x, 2);
+    ei_x_encode_ref(&x, &ref);
+    ei_x_append(&x, &x2);
+
+    ei_x_free(&x2);
+
   } else {
-    // no-ref => exit?, TODO
+    // no-ref => exit?
   }
 
   driver_output(data->port, x.buff, x.index);
@@ -444,12 +450,12 @@ static ErlDrvSSizeT control(ErlDrvData drv_data, unsigned int command,
   if (NULL != func) {
     exec(func, len, data, buf, &index, &x);
   } else {
-    encode_error(&x, "not_implemented");
+    encode_error(&x, "enosys");
   }
 
   ErlDrvSizeT result = x.index;
 
-  if (rlen > result) {
+  if (rlen >= result) {
 
     memcpy(*rbuf, x.buff, result);
 
@@ -482,7 +488,7 @@ static ErlDrvSSizeT call(ErlDrvData drv_data, unsigned int command,
                          char **rbuf, ErlDrvSizeT rlen, unsigned int *flags) {
   UNUSED(flags); // ?
 
-  return control(drv_data, command, buf, len, rbuf, rlen); // rlen <= result -> badarg
+  return control(drv_data, command, buf, len, rbuf, rlen); // > rlen -> badarg
 }
 
 static ErlDrvEntry driver_entry = {
