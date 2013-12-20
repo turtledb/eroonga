@@ -320,73 +320,36 @@ static void exec(driver_func_t func, ErlDrvSizeT size,
 // -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 
-static ErlDrvSSizeT control(ErlDrvData drv_data, unsigned int command,
-                            char *buf, ErlDrvSizeT len, char **rbuf, ErlDrvSizeT rlen) {
-  UNUSED(rlen);
-
-  static driver_func_t TABLE[] = {
-    /* ERN_CONTROL_DB_OPEN */     eroonga_db_open,
-  };
-
-  static size_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);
-
-  driver_data_t *data = (driver_data_t *)drv_data;
-
-  ei_x_buff x;
-  ei_x_new_with_version(&x);
-
-  int index = 0, version;
-  ei_decode_version(buf, &index, &version);
-
-  driver_func_t func = TABLE_SIZE > command ? TABLE[command] : NULL;
-
-  if (NULL != func) {
-    exec(func, len, data, buf, &index, &x);
-  } else {
-    encode_error(&x, "not_implemented");
-  }
-
-  ErlDrvBinary *binary = driver_alloc_binary(x.index); // NULL?, TODO
-
-  ErlDrvSizeT result = x.index;
-  memcpy(&binary->orig_bytes[0], x.buff, result);
-
-  *rbuf = (char *)binary;
-
-  ei_x_free(&x);
-
-  return result;
-}
-
 static int init() {
   return GRN_SUCCESS == grn_init() ? 0 : -1;
 }
 
-static void finish() {
-  grn_fin();
-}
-
 static ErlDrvData start(ErlDrvPort port, char *command) {
 
-  UNUSED(command);
+  UNUSED(command); // command=driver_name
 
   void *ptr = driver_alloc(sizeof(driver_data_t));
 
   if (NULL != ptr) {
 
-    int flags = 0; // GRN_CTX_USE_QL ?
+    driver_data_t *data = (driver_data_t *)ptr;
+
+    int flags = 0;
     grn_ctx *ctx = grn_ctx_open(flags);
 
     if (NULL != ctx) {
 
       set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
 
-      driver_data_t *data = (driver_data_t *)ptr;
       data->port = port;
       data->ctx = ctx;
 
       return (ErlDrvData)data;
     }
+
+    driver_free(data);
+
+    return ERL_DRV_ERROR_GENERAL;
   }
 
   errno = ENOMEM;
@@ -397,13 +360,16 @@ static void stop(ErlDrvData drv_data) {
 
   driver_data_t *data = (driver_data_t *)drv_data;
 
-  grn_ctx *ctx = data->ctx;
+  if (NULL != data) {
 
-  if (NULL != ctx) {
-    grn_ctx_close(ctx);
+    grn_ctx *ctx = data->ctx;
+
+    if (NULL != ctx) {
+      grn_ctx_close(ctx);
+    }
+
+    driver_free(data);
   }
-
-  driver_free(data);
 }
 
 static void output(ErlDrvData drv_data, char *buf, ErlDrvSizeT len) {
@@ -428,7 +394,7 @@ static void output(ErlDrvData drv_data, char *buf, ErlDrvSizeT len) {
     erlang_ref ref;
     ei_decode_ref(buf, &index, &ref);
 
-    ei_x_encode_tuple_header(&x, 2);
+    ei_x_encode_tuple_header(&x, 2); // TODO
     ei_x_encode_ref(&x, &ref);
 
     unsigned long command;
@@ -451,6 +417,74 @@ static void output(ErlDrvData drv_data, char *buf, ErlDrvSizeT len) {
   ei_x_free(&x);
 }
 
+static void finish() {
+  grn_fin();
+}
+
+static ErlDrvSSizeT control(ErlDrvData drv_data, unsigned int command,
+                            char *buf, ErlDrvSizeT len,
+                            char **rbuf, ErlDrvSizeT rlen) {
+
+  static driver_func_t TABLE[] = {
+    /* ERN_CONTROL_DB_OPEN */     eroonga_db_open,
+  };
+
+  static size_t TABLE_SIZE = sizeof(TABLE) / sizeof(TABLE[0]);
+
+  driver_data_t *data = (driver_data_t *)drv_data;
+
+  ei_x_buff x;
+  ei_x_new_with_version(&x);
+
+  int index = 0, version;
+  ei_decode_version(buf, &index, &version);
+
+  driver_func_t func = TABLE_SIZE > command ? TABLE[command] : NULL;
+
+  if (NULL != func) {
+    exec(func, len, data, buf, &index, &x);
+  } else {
+    encode_error(&x, "not_implemented");
+  }
+
+  ErlDrvSizeT result = x.index;
+
+  if (rlen > result) {
+
+    memcpy(*rbuf, x.buff, result);
+
+  } else {
+
+    ErlDrvBinary *binary = driver_alloc_binary(result);
+
+    if (NULL != binary) {
+
+      memcpy(&binary->orig_bytes[0], x.buff, result);
+
+      *rbuf = (char *)binary;
+
+    } else {
+
+      ei_x_new_with_version(&x); // reset
+      encode_error(&x, "nomem");
+
+      memcpy(*rbuf, x.buff, result = x.index);
+    }
+  }
+
+  ei_x_free(&x);
+
+  return result;
+}
+
+static ErlDrvSSizeT call(ErlDrvData drv_data, unsigned int command,
+                         char *buf, ErlDrvSizeT len,
+                         char **rbuf, ErlDrvSizeT rlen, unsigned int *flags) {
+  UNUSED(flags); // ?
+
+  return control(drv_data, command, buf, len, rbuf, rlen); // rlen <= result -> badarg
+}
+
 static ErlDrvEntry driver_entry = {
   .init = init,
   .start = start,
@@ -466,7 +500,7 @@ static ErlDrvEntry driver_entry = {
   .outputv = NULL,
   .ready_async = NULL,
   .flush = NULL,
-  .call = NULL,
+  .call = call,
   .event = NULL,
   .extended_marker = ERL_DRV_EXTENDED_MARKER,
   .major_version = ERL_DRV_EXTENDED_MAJOR_VERSION,

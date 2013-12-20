@@ -150,7 +150,7 @@ setup({path,Term}, #state{port=P}=S)
               is_list(Term)   -> list_to_binary(Term);
               true -> throw({badarg,path})
            end,
-    case eroonga_driver:control(P, ?ERN_CONTROL_DB_OPEN, [Path]) of
+    case eroonga_driver:call(P, ?ERN_CONTROL_DB_OPEN, [Path]) of % or control
         ok ->
             S#state{path = Path};
         {error, Reason} ->

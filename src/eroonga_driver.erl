@@ -23,7 +23,7 @@
 -export([load/1, unload/1]).
 -export([path/1, name/1, settings/1]).
 -export([open/1, open/2, close/1]).
--export([command/4, control/3]).
+-export([call/3, command/4, control/3]).
 
 %% -- private --
 -record(handle, {
@@ -61,15 +61,18 @@ unload(#handle{name=N})
     erl_ddll:unload(N).
 
 -spec path(handle()) -> string().
-path(#handle{path=P}) ->
+path(#handle{path=P})
+  when undefined =/= P ->
     P.
 
 -spec name(handle()) -> string().
-name(#handle{name=N}) ->
+name(#handle{name=N})
+  when undefined =/= N ->
     N.
 
 -spec settings(handle()) -> [property()].
-settings(#handle{settings=L}) ->
+settings(#handle{settings=L})
+  when undefined =/= L ->
     L.
 
 -spec open(handle()) -> {ok,port()}|{error,_}.
@@ -93,6 +96,17 @@ close(Port)
     true = unlink(Port),
     true = port_close(Port),
     ok.
+
+-spec call(port(),integer(),[term()]) -> ok|{error,_}.
+call(Port, Command, Args)
+  when is_port(Port), is_integer(Command), is_list(Args) ->
+    try erlang:port_call(Port, Command, Args) of
+        Term when not is_binary(Term) ->
+            Term
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
 
 -spec command(port(),reference(),integer(),[term()]) -> ok|{error,_}.
 command(Port, Ref, Command, Args)
