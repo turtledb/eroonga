@@ -12,7 +12,7 @@
 #CFLAGS += -D__STDC_FORMAT_MACROS -D__STDC_CONSTANT_MACROS
  CFLAGS += -g
  CFLAGS += -Wall
-#CFLAGS += -Wextra
+ CFLAGS += -Wextra
  CFLAGS += -fPIC
  CFLAGS += -fno-common
 

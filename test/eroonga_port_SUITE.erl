@@ -15,10 +15,38 @@
 %% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
 
--module(eroonga_util).
+-module(eroonga_port_SUITE).
 
--export([flush/0]).
+-compile(export_all).
 
--spec flush() -> ok.
-flush() ->
-    receive _ -> flush() after 0 -> ok end.
+-include_lib("common_test/include/ct.hrl").
+
+-include("../src/eroonga_internal.hrl").
+
+all() -> [
+          {group, test_normal}
+         ].
+
+groups() ->
+    [
+     {test_normal, [], [
+                        {group,conf_test}
+                       ]},
+
+     {conf_test, [], [
+                     ]}
+    ].
+
+init_per_suite(Config) ->
+    Config.
+
+end_per_suite(Config) ->
+    Config.
+
+init_per_group(_Group, Config) ->
+    Config.
+
+end_per_group(_Group, Config) ->
+    Config.
+
+%% == group:  ==

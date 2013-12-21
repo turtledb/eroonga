@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Copyright 2013 AONO Tomohiko
+%% Copyright 2013-2014 AONO Tomohiko
 %%
 %% This library is free software; you can redistribute it and/or
 %% modify it under the terms of the GNU Lesser General Public
@@ -46,7 +46,7 @@ start_link(Args)
                 ok ->
                     {ok, Pid};
                 {error, Reason} ->
-                    stop(Pid),
+                    ok = stop(Pid),
                     {error, Reason}
             end;
         Other ->
@@ -58,7 +58,7 @@ stop(Pid)
   when is_pid(Pid) ->
     gen_server:call(Pid, stop).
 
--spec call(pid(),integer(),[term()]) -> term().
+-spec call(pid(),integer(),[term()]) -> term()|{error,_}.
 call(Pid, Command, Args)
   when is_pid(Pid), is_integer(Command), is_list(Args) ->
     case cast(Pid, Command, Args) of
@@ -133,7 +133,7 @@ cleanup(#state{}) ->
     eroonga_util:flush().
 
 setup([]) ->
-    process_flag(trap_exit, true),
+    _ = process_flag(trap_exit, true),
     {ok, #state{assigned = dict:new()}}.
 
 setup({driver,Term}, #state{port=undefined}=S)
@@ -144,15 +144,26 @@ setup({driver,Term}, #state{port=undefined}=S)
         {error, Reason} ->
             throw({Reason,S})
     end;
-setup({path,Term}, #state{port=P}=S)
+setup({path,Term}, #state{port=P,path=undefined}=S)
   when is_port(P) ->
     Path = if is_binary(Term) -> Term;
               is_list(Term)   -> list_to_binary(Term);
               true -> throw({badarg,path})
            end,
-    case eroonga_driver:call(P, ?ERN_CONTROL_DB_OPEN, [Path]) of % or control
+    case eroonga_driver:control(P, ?ERN_CONTROL_DB_OPEN, [Path]) of
         ok ->
             S#state{path = Path};
+        {error, Reason} ->
+            throw({Reason,S})
+    end;
+setup({options,Term}, #state{port=P,path=D}=S)
+  when is_port(P), is_binary(D) ->
+    Args = if is_list(Term) -> proplists:unfold(Term);
+              true -> throw({badarg,path})
+           end,
+    case eroonga_driver:control(P, ?ERN_CONTROL_SET_OPTIONS, Args) of
+        ok ->
+            S;
         {error, Reason} ->
             throw({Reason,S})
     end;

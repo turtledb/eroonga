@@ -23,7 +23,23 @@ run(direct) ->
     io:format("run: direct~n"),
     case eroonga_driver:load([{name,"liberoonga_drv"}]) of
         {ok, T} ->
-            case eroonga_port:start_link([{driver,T},{path,"/tmp/groonga/x3"}]) of
+            L = [
+                 {driver,T},
+                 {path,<<"/tmp/groonga/x3">>},
+                 {options, [
+                            %%{s, "zyx"},
+                            %%{b, <<"wvu">>},
+                            %%{i, 987},
+                            %%{f, 12.345},
+                            %%{a, false},
+                            %%x
+                            %%{x, make_ref()}
+                            %%{x, self()}
+                            %%{x, lists:min(erlang:ports())}
+                            {encoding, utf8}
+                           ]}
+                ],
+            case eroonga_port:start_link(L) of
                 {ok, Pid} ->
                     run(0, Pid),
                     timer:sleep(2000),
@@ -38,7 +54,7 @@ run(direct) ->
 
 main(_) ->
     L = [
-         pool,
+%        pool,
          direct
         ],
     [ run(A) || A <- L ].

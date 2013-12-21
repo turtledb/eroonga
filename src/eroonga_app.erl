@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Copyright 2013 AONO Tomohiko
+%% Copyright 2013-2014 AONO Tomohiko
 %%
 %% This library is free software; you can redistribute it and/or
 %% modify it under the terms of the GNU Lesser General Public
@@ -56,19 +56,19 @@ checkout(Pool, Block, Timeout)
 
 -spec env() ->[property()].
 env() ->
-    _ = application:load(?APP),
-    lists:sort(application:get_all_env(?APP)).
+    _ = application:load(eroonga),
+    lists:sort(application:get_all_env(eroonga)).
 
 -spec deps() -> [atom()].
 deps() ->
-    _ = application:load(?APP),
-    {ok, List} = application:get_key(?APP, applications),
+    _ = application:load(eroonga),
+    {ok, List} = application:get_key(eroonga, applications),
     lists:foldl(fun proplists:delete/2, List, [kernel,stdlib]).
 
 -spec version() -> [non_neg_integer()].
 version() ->
-    _ = application:load(?APP),
-    {ok, List} = application:get_key(?APP, vsn),
+    _ = application:load(eroonga),
+    {ok, List} = application:get_key(eroonga, vsn),
     lists:map(fun list_to_integer/1, string:tokens(List, ".")).
 
 %% == behaviour: application ==

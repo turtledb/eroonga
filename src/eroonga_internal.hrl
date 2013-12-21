@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Copyright 2013 AONO Tomohiko
+%% Copyright 2013-2014 AONO Tomohiko
 %%
 %% This library is free software; you can redistribute it and/or
 %% modify it under the terms of the GNU Lesser General Public
@@ -14,8 +14,6 @@
 %% License along with this library; if not, write to the Free Software
 %% Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 %% =============================================================================
-
--define(APP, eroonga).
 
 %% == ~/include/groonga.h ==
 
@@ -40,7 +38,8 @@
 
 %% == other ==
 %
--define(ERN_CONTROL_DB_OPEN, 0).
+-define(ERN_CONTROL_DB_OPEN,     0).
+-define(ERN_CONTROL_SET_OPTIONS, 1).
 
 -define(ERN_OUTPUT_TABLE_SELECT, 0).
 

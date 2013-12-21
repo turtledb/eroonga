@@ -1,5 +1,5 @@
 %% =============================================================================
-%% Copyright 2013 AONO Tomohiko
+%% Copyright 2013-2014 AONO Tomohiko
 %%
 %% This library is free software; you can redistribute it and/or
 %% modify it under the terms of the GNU Lesser General Public
@@ -47,7 +47,7 @@ load(Configs)
                 {error, already_loaded} ->
                     {ok, H};
                 {error, Reason} ->
-                    error_logger:error_report([erl_ddll:format_error(Reason),H]),
+                    ok = error_logger:error_report([erl_ddll:format_error(Reason),H]),
                     {error, Reason}
             end
     catch
@@ -86,7 +86,7 @@ open(#handle{name=N}, Settings)
         Port ->
             {ok, Port}
     catch
-        _:Reason ->
+        error:Reason ->
             {error, Reason}
     end.
 
@@ -97,15 +97,15 @@ close(Port)
     true = port_close(Port),
     ok.
 
--spec call(port(),integer(),[term()]) -> ok|{error,_}.
+-spec call(port(),integer(),[term()]) -> term()|{error,_}.
 call(Port, Command, Args)
   when is_port(Port), is_integer(Command), is_list(Args) ->
     try erlang:port_call(Port, Command, Args) of
         Term when not is_binary(Term) ->
             Term
     catch
-        _:Reason ->
-            {error, Reason}
+        error:badarg ->
+            {error, badarg}
     end.
 
 -spec command(port(),reference(),integer(),[term()]) -> ok|{error,_}.
@@ -115,8 +115,8 @@ command(Port, Ref, Command, Args)
         true ->
             ok
     catch
-        _:Reason ->
-            {error, Reason}
+        error:badarg ->
+            {error, badarg}
     end.
 
 -spec control(port(),integer(),[term()]) -> term()|{error,_}.
@@ -126,8 +126,8 @@ control(Port, Command, Args)
         Term when is_binary(Term) ->
             binary_to_term(Term)
     catch
-        _:Reason ->
-            {error, Reason}
+        error:badarg ->
+            {error, badarg}
     end.
 
 %% == private ==
@@ -162,6 +162,4 @@ set_handle(_Ignore, #handle{}=H) ->
     H.
 
 setup() ->
-    #handle{path = lib_dir(undefined),
-            name = lists:concat(["lib",atom_to_list(?APP),"_drv"]),
-            settings = []}.
+    #handle{path = lib_dir(undefined), name = "liberoonga_drv", settings = []}.
